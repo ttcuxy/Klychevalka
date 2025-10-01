@@ -229,15 +229,25 @@ Return the result in a valid JSON object with the following keys:
         const { title, description, keywords } = uploadedFile.metadata!;
 
         const iptcData = {
-          5: title, // IPTC.ObjectName (Title)
-          120: description, // IPTC.Caption (Description)
-          25: keywords, // IPTC.Keywords
+          5: title,
+          120: description,
+          25: keywords,
         };
 
-        console.log("Данные для записи:", iptcData);
+        const exifData = {
+          270: description, // ImageDescription
+          40091: title, // XPTitle
+          40094: keywords.join('; '), // XPKeywords
+        };
 
-        const exifObj = { IPTC: iptcData };
-        const exifbytes = piexif.dump(exifObj);
+        const metadataObject = {
+          "IPTC": iptcData,
+          "Exif": exifData,
+        };
+
+        console.log("Данные для записи:", metadataObject);
+
+        const exifbytes = piexif.dump(metadataObject);
         const newImageDataUrl = piexif.insert(exifbytes, imageDataUrl);
 
         const response = await fetch(newImageDataUrl);
