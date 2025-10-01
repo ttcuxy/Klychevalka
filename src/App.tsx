@@ -27,8 +27,8 @@ Return the result in a valid JSON object with the following keys:
 - "keywords" (as a JSON array of 27-40 items in priority order, most important first)`);
 
   return (
-    <div className="bg-neutral-900 text-gray-200">
-      <div className="min-h-screen flex flex-col">
+    <div className="bg-neutral-900 text-gray-200 min-h-screen">
+      <div className="flex flex-col">
         <header className="border-b border-neutral-700 p-4 sticky top-0 bg-neutral-900/80 backdrop-blur-sm z-10">
           <div className="container mx-auto flex items-center justify-between">
             <div className="flex items-center gap-2">
