@@ -275,13 +275,15 @@ const handleDownload = async () => {
       // Шаг 2: MODIFY
       const { title, description, keywords } = file.metadata;
 
-      // Заполняем IPTC (для Adobe и др.)
-      exifObj.IPTC[piexif.IPTC.ObjectName] = title;
-      exifObj.IPTC[piexif.IPTC.Caption_Abstract] = description;
-      exifObj.IPTC[piexif.IPTC.Keywords] = keywords;
+     // Заполняем IPTC (для Adobe и др.), используя ПРЯМЫЕ ЧИСЛОВЫЕ КОДЫ
+      exifObj.IPTC[5] = title; // 5 = ObjectName
+      exifObj.IPTC[120] = description; // 120 = Caption_Abstract
+      exifObj.IPTC[25] = keywords; // 25 = Keywords
 
-      // Заполняем Exif (для Windows Explorer)
-      exifObj.Exif[piexif.ExifIFD.ImageDescription] = description;
+      // Заполняем Exif (для Windows Explorer), используя ПРЯМЫЕ ЧИСЛОВЫЕ КОДЫ
+      exifObj.Exif[270] = description; // 270 = ImageDescription
+      exifObj.Exif[40091] = encodeStringToUCS2(title); // 40091 = XPTitle
+      exifObj.Exif[40094] = encodeStringToUCS2(keywords.join(';')); // 40094 = XPKeywords
       // Используем нашу функцию для правильной кодировки
       exifObj.Exif[piexif.WindowsExif.XPTitle] = encodeStringToUCS2(title);
       exifObj.Exif[piexif.WindowsExif.XPKeywords] = encodeStringToUCS2(keywords.join(';'));
