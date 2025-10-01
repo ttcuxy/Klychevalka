@@ -29,6 +29,18 @@ const toBase64 = (file: File): Promise<string> =>
     reader.onerror = (error) => reject(error);
   });
 
+// 1. Helper function for UCS2 encoding
+const encodeStringToUCS2 = (str: string): number[] => {
+  const nullTerminatedStr = str + '\0';
+  const bytes: number[] = [];
+  for (let i = 0; i < nullTerminatedStr.length; i++) {
+    const code = nullTerminatedStr.charCodeAt(i);
+    bytes.push(code & 0xff);
+    bytes.push((code >> 8) & 0xff);
+  }
+  return bytes;
+};
+
 function App() {
   const [apiKey, setApiKey] = useState('');
   const [models, setModels] = useState<string[]>([]);
@@ -216,8 +228,10 @@ Return the result in a valid JSON object with the following keys:
     setStatus('done');
   };
 
+  // 2. Rewritten handleDownload function
   const handleDownload = async () => {
     setIsDownloading(true);
+    setError(null);
     try {
       const zip = new JSZip();
       const completedFiles = uploadedFiles.filter(
@@ -225,30 +239,42 @@ Return the result in a valid JSON object with the following keys:
       );
 
       for (const uploadedFile of completedFiles) {
-        const imageDataUrl = await toBase64(uploadedFile.file);
+        const base64String = await toBase64(uploadedFile.file);
         const { title, description, keywords } = uploadedFile.metadata!;
 
-        const iptcData = {
-          5: title,
-          120: description,
-          25: keywords,
-        };
+        // Step LOAD
+        const exifObj = piexif.load(base64String);
 
-        const exifData = {
-          270: description, // ImageDescription (ASCII)
-        };
+        // Step MODIFY
+        if (!exifObj.Exif) {
+          exifObj.Exif = {};
+        }
+        if (!exifObj.IPTC) {
+          exifObj.IPTC = {};
+        }
+        if (!exifObj['0th']) {
+          exifObj['0th'] = {};
+        }
 
-        const metadataObject = {
-          "IPTC": iptcData,
-          "Exif": exifData,
-        };
+        // IPTC Fields
+        exifObj.IPTC[piexif.Const.IPTC.ObjectName] = title; // 5
+        exifObj.IPTC[piexif.Const.IPTC.Caption] = description; // 120
+        exifObj.IPTC[piexif.Const.IPTC.Keywords] = keywords; // 25
 
-        const exifbytes = piexif.dump(metadataObject);
-        const newImageDataUrl = piexif.insert(exifbytes, imageDataUrl);
+        // EXIF Fields
+        exifObj['0th'][piexif.Const.ImageIFD.ImageDescription] = description; // 270
+        exifObj.Exif[piexif.Const.Exif.XPTitle] = encodeStringToUCS2(title); // 40091
+        exifObj.Exif[piexif.Const.Exif.XPKeywords] = encodeStringToUCS2(keywords.join(';')); // 40094
 
-        const response = await fetch(newImageDataUrl);
+        // Step DUMP
+        const newExifStr = piexif.dump(exifObj);
+
+        // Step INSERT
+        const newBase64 = piexif.insert(newExifStr, base64String);
+
+        // Add to ZIP
+        const response = await fetch(newBase64);
         const blob = await response.blob();
-
         zip.file(uploadedFile.file.name, blob);
       }
 
@@ -264,7 +290,7 @@ Return the result in a valid JSON object with the following keys:
       }
     } catch (e) {
       console.error('Failed to download files:', e);
-      setError('An error occurred during the download process.');
+      setError(`An error occurred during the download process: ${(e as Error).message}`);
     } finally {
       setIsDownloading(false);
     }
