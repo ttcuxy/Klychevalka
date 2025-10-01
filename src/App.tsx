@@ -285,8 +285,7 @@ const handleDownload = async () => {
       exifObj.Exif[40091] = encodeStringToUCS2(title); // 40091 = XPTitle
       exifObj.Exif[40094] = encodeStringToUCS2(keywords.join(';')); // 40094 = XPKeywords
       // Используем нашу функцию для правильной кодировки
-      exifObj.Exif[piexif.WindowsExif.XPTitle] = encodeStringToUCS2(title);
-      exifObj.Exif[piexif.WindowsExif.XPKeywords] = encodeStringToUCS2(keywords.join(';'));
+    
       
       // Шаг 3: DUMP
       const newExifStr = piexif.dump(exifObj);
