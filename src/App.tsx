@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 
 interface OpenAIModel {
   id: string;
@@ -9,8 +9,10 @@ function App() {
   const [models, setModels] = useState<string[]>([]);
   const [isVerifying, setIsVerifying] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [files, setFiles] = useState<File[]>([]);
+  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [status, setStatus] = useState<'idle' | 'processing' | 'done'>('idle');
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -63,6 +65,43 @@ Return the result in a valid JSON object with the following keys:
     } finally {
       setIsVerifying(false);
     }
+  };
+
+  const handleFilesChange = (files: FileList | null) => {
+    if (!files) return;
+
+    const newFiles = Array.from(files)
+      .filter((file) => file.type.startsWith('image/'))
+      .filter(
+        (newFile) =>
+          !uploadedFiles.some(
+            (existingFile) => existingFile.name === newFile.name
+          )
+      );
+
+    setUploadedFiles((prevFiles) => [...prevFiles, ...newFiles]);
+  };
+
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragging(false);
+    handleFilesChange(e.dataTransfer.files);
+  };
+
+  const removeFile = (indexToRemove: number) => {
+    setUploadedFiles((prevFiles) =>
+      prevFiles.filter((_, index) => index !== indexToRemove)
+    );
   };
 
   return (
@@ -188,8 +227,24 @@ Return the result in a valid JSON object with the following keys:
                 <div className="space-y-4">
                   <div
                     id="file-dropzone"
-                    className="border-2 border-dashed border-neutral-600 rounded-lg p-12 flex flex-col items-center justify-center text-center cursor-pointer hover:border-purple-500 transition-colors"
+                    onClick={() => fileInputRef.current?.click()}
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onDrop={handleDrop}
+                    className={`border-2 border-dashed  rounded-lg p-12 flex flex-col items-center justify-center text-center cursor-pointer transition-colors ${
+                      isDragging
+                        ? 'border-purple-500 bg-neutral-700/50'
+                        : 'border-neutral-600 hover:border-purple-500'
+                    }`}
                   >
+                    <input
+                      type="file"
+                      ref={fileInputRef}
+                      onChange={(e) => handleFilesChange(e.target.files)}
+                      multiple
+                      accept="image/*"
+                      className="hidden"
+                    />
                     <svg
                       xmlns="http://www.w3.org/2000/svg"
                       width="48"
@@ -213,16 +268,57 @@ Return the result in a valid JSON object with the following keys:
                   </div>
                   <div
                     id="image-list-container"
-                    className="space-y-2 max-h-96 min-h-[6rem] overflow-y-auto p-2 border border-neutral-700 rounded-md bg-neutral-900/50 flex items-center justify-center"
+                    className="space-y-2 max-h-96 min-h-[6rem] overflow-y-auto p-2 border border-neutral-700 rounded-md bg-neutral-900/50"
                   >
-                    <p className="text-gray-500 text-center">
-                      No images uploaded yet.
-                    </p>
+                    {uploadedFiles.length === 0 ? (
+                      <div className="flex items-center justify-center h-full">
+                        <p className="text-gray-500 text-center">
+                          No images uploaded yet.
+                        </p>
+                      </div>
+                    ) : (
+                      uploadedFiles.map((file, index) => (
+                        <div
+                          key={index}
+                          className="flex items-center justify-between bg-neutral-800 p-2 rounded-md animate-in fade-in"
+                        >
+                          <div className="flex items-center gap-3 overflow-hidden">
+                            <img
+                              src={URL.createObjectURL(file)}
+                              alt={file.name}
+                              className="w-10 h-10 object-cover rounded flex-shrink-0"
+                            />
+                            <span className="text-sm text-gray-300 truncate">
+                              {file.name}
+                            </span>
+                          </div>
+                          <button
+                            onClick={() => removeFile(index)}
+                            className="text-gray-500 hover:text-red-500 p-1 rounded-full transition-colors"
+                          >
+                            <svg
+                              xmlns="http://www.w3.org/2000/svg"
+                              width="18"
+                              height="18"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <line x1="18" y1="6" x2="6" y2="18" />
+                              <line x1="6" y1="6" x2="18" y2="18" />
+                            </svg>
+                          </button>
+                        </div>
+                      ))
+                    )}
                   </div>
                   <div className="flex gap-4">
                     <button
                       id="start-btn"
-                      disabled
+                      disabled={uploadedFiles.length === 0}
                       className="flex-1 bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       Start Processing
