@@ -234,48 +234,54 @@ Return the result in a valid JSON object with the following keys:
         let exifObj;
         try {
           exifObj = piexif.load(base64String);
-          console.log('1. Loaded EXIF data:', exifObj);
+          console.log('1. Loaded EXIF data. Keys:', Object.keys(exifObj));
+          console.log('1a. Does IPTC block exist initially?', 'IPTC' in exifObj);
         } catch (e) {
           console.warn(`1. Could not parse EXIF for ${file.file.name}, creating new structure.`, e);
           exifObj = { "0th": {}, "Exif": {}, "GPS": {}, "1st": {}, "IPTC": {}, "thumbnail": null };
         }
 
         // Step 2: VALIDATE & NORMALIZE (ROBUST)
-        // Ensure all required top-level blocks exist before trying to write to them.
-        exifObj['0th'] = exifObj['0th'] || {};
-        exifObj['Exif'] = exifObj['Exif'] || {};
-        exifObj['GPS'] = exifObj['GPS'] || {};
-        exifObj['1st'] = exifObj['1st'] || {};
-        exifObj['IPTC'] = exifObj['IPTC'] || {}; // This is the critical fix.
-        if (exifObj.thumbnail === undefined) {
-          exifObj.thumbnail = null;
+        console.log('2. Normalizing EXIF object...');
+        if (!exifObj.IPTC) {
+          console.log('2a. IPTC block is missing. Creating it.');
+          exifObj.IPTC = {};
+        } else {
+          console.log('2a. IPTC block already exists.');
         }
-        console.log('2. EXIF object after normalization:', exifObj);
+        console.log('2b. EXIF object after ensuring IPTC exists. Keys:', Object.keys(exifObj));
+        console.log('2c. Is exifObj.IPTC an object now?', typeof exifObj.IPTC, exifObj.IPTC);
 
         const { title, description, keywords } = file.metadata;
         
         // Step 3: MODIFY
-        // Now it's safe to write to exifObj.IPTC because we guaranteed it exists.
-        exifObj.IPTC[piexif.Const.IPTC.ObjectName] = title;
-        exifObj.IPTC[piexif.Const.IPTC.Caption] = description;
-        exifObj.IPTC[piexif.Const.IPTC.Keywords] = keywords;
-        
-        // Also write description to the standard image description field
-        exifObj['0th'][piexif.Const.ImageIFD.ImageDescription] = description;
-        console.log('3. EXIF object after modification:', exifObj);
+        try {
+          console.log('3. Attempting to modify IPTC data...');
+          exifObj.IPTC[piexif.Const.IPTC.ObjectName] = title;
+          exifObj.IPTC[piexif.Const.IPTC.Caption] = description;
+          exifObj.IPTC[piexif.Const.IPTC.Keywords] = keywords;
+          
+          if (!exifObj['0th']) exifObj['0th'] = {};
+          exifObj['0th'][piexif.Const.ImageIFD.ImageDescription] = description;
+          console.log('3a. Successfully modified IPTC and 0th IFD data.');
+        } catch (modifyError) {
+          console.error('3b. CRITICAL ERROR during modification step:', modifyError);
+          console.log('3c. State of exifObj right before modification crash:', exifObj);
+          throw modifyError;
+        }
         
         // Step 4: DUMP & INSERT
+        console.log('4. DUMP & INSERT...');
         const newExifStr = piexif.dump(exifObj);
         const newBase64 = piexif.insert(newExifStr, base64String);
 
         const fileData = newBase64.replace(/^data:image\/(jpeg|png);base64,/, "");
         zip.file(file.file.name, fileData, { base64: true });
-        console.log(`4. Successfully processed and added ${file.file.name} to zip.`);
+        console.log(`5. Successfully processed and added ${file.file.name} to zip.`);
 
       } catch (err) {
         console.error(`Failed to process file ${file.file.name}:`, err);
         setError(`An error occurred while processing ${file.file.name}: ${(err as Error).message}`);
-        // Optionally update the status of the specific file to 'error'
         setUploadedFiles(prev => prev.map(f => f.id === file.id ? { ...f, status: 'error', error: (err as Error).message } : f));
       }
     }
