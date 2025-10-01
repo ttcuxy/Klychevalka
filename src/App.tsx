@@ -228,6 +228,19 @@ Return the result in a valid JSON object with the following keys:
         const imageDataUrl = await toBase64(uploadedFile.file);
         const { title, description, keywords } = uploadedFile.metadata!;
 
+        // Helper to encode string to UCS-2/UTF-16LE byte array
+        const encodeWindowsString = (str: string): number[] => {
+          const bytes: number[] = [];
+          for (let i = 0; i < str.length; i++) {
+            const code = str.charCodeAt(i);
+            bytes.push(code & 0xff); // little-endian low byte
+            bytes.push(code >> 8);   // little-endian high byte
+          }
+          // Null terminator
+          bytes.push(0, 0);
+          return bytes;
+        };
+
         const iptcData = {
           5: title,
           120: description,
@@ -235,17 +248,15 @@ Return the result in a valid JSON object with the following keys:
         };
 
         const exifData = {
-          270: description, // ImageDescription
-          40091: title, // XPTitle
-          40094: keywords.join('; '), // XPKeywords
+          270: description, // ImageDescription (ASCII)
+          40091: encodeWindowsString(title), // XPTitle (UCS-2)
+          40094: encodeWindowsString(keywords.join('; ')), // XPKeywords (UCS-2)
         };
 
         const metadataObject = {
           "IPTC": iptcData,
           "Exif": exifData,
         };
-
-        console.log("Данные для записи:", metadataObject);
 
         const exifbytes = piexif.dump(metadataObject);
         const newImageDataUrl = piexif.insert(exifbytes, imageDataUrl);
