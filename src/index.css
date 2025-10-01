@@ -135,3 +135,7 @@ button:focus-visible {
     @apply bg-background text-foreground;
   }
 }
+
+body {
+  @apply bg-neutral-900 text-neutral-200;
+}

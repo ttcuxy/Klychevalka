@@ -1,12 +1,18 @@
 import { useState } from 'react';
 
+interface OpenAIModel {
+  id: string;
+}
+
 function App() {
   const [apiKey, setApiKey] = useState('');
+  const [models, setModels] = useState<string[]>([]);
+  const [isVerifying, setIsVerifying] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [files, setFiles] = useState<File[]>([]);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [status, setStatus] = useState<'idle' | 'processing' | 'done'>('idle');
-  const [models, setModels] = useState<string[]>([]);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [prompt, setPrompt] = useState(`You are an expert stock photography metadata analyst. Analyze the provided image and generate a commercially optimized Title, Description, and Keywords for Adobe Stock.
 Constraints:
@@ -25,6 +31,39 @@ Return the result in a valid JSON object with the following keys:
 - "title"
 - "description"
 - "keywords" (as a JSON array of 27-40 items in priority order, most important first)`);
+
+  const handleVerifyApiKey = async () => {
+    if (!apiKey) {
+      setError('Please enter an API key.');
+      return;
+    }
+    setIsVerifying(true);
+    setError(null);
+    setModels([]);
+
+    try {
+      const response = await fetch('https://api.openai.com/v1/models', {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+        },
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error?.message || 'Failed to verify API key.');
+      }
+
+      const fetchedModels = data.data
+        .map((model: OpenAIModel) => model.id)
+        .sort();
+      setModels(fetchedModels);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setIsVerifying(false);
+    }
+  };
 
   return (
     <div className="bg-neutral-900 text-gray-200 min-h-screen">
@@ -78,14 +117,22 @@ Return the result in a valid JSON object with the following keys:
                       className="w-full bg-neutral-700 border border-neutral-600 rounded-md px-3 py-2 text-gray-200 placeholder:text-gray-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 transition"
                       value={apiKey}
                       onChange={(e) => setApiKey(e.target.value)}
+                      disabled={isVerifying}
                     />
                   </div>
                   <button
                     id="verify-key-btn"
-                    className="w-full bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-4 rounded-md transition-colors"
+                    onClick={handleVerifyApiKey}
+                    disabled={isVerifying || !apiKey.trim()}
+                    className="w-full bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-4 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    Verify Key &amp;amp; Load Models
+                    {isVerifying
+                      ? 'Verifying...'
+                      : 'Verify Key & Load Models'}
                   </button>
+                  {error && (
+                    <p className="text-sm text-red-500 mt-2">{error}</p>
+                  )}
                 </div>
               </div>
               <div className="bg-neutral-800 border border-neutral-700 rounded-lg p-6 shadow-sm">
@@ -102,10 +149,18 @@ Return the result in a valid JSON object with the following keys:
                     </label>
                     <select
                       id="model-select"
-                      disabled={models.length === 0}
+                      disabled={models.length === 0 || isVerifying}
                       className="w-full bg-neutral-700 border border-neutral-600 rounded-md px-3 py-2 text-gray-200 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500"
                     >
-                      <option>Verify API key to load models</option>
+                      {models.length === 0 ? (
+                        <option>Verify API key to load models</option>
+                      ) : (
+                        models.map((model) => (
+                          <option key={model} value={model}>
+                            {model}
+                          </option>
+                        ))
+                      )}
                     </select>
                   </div>
                   <div>
@@ -152,7 +207,7 @@ Return the result in a valid JSON object with the following keys:
                       <line x1="12" x2="12" y1="3" y2="15" />
                     </svg>
                     <p className="mt-4 text-gray-400">
-                      Drag &amp;amp; drop your images here, or click to select
+                      Drag &amp; drop your images here, or click to select
                       files
                     </p>
                   </div>
