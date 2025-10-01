@@ -229,9 +229,9 @@ Return the result in a valid JSON object with the following keys:
         const { title, description, keywords } = uploadedFile.metadata!;
 
         const iptcData = {
-          [piexif.IPTC.ObjectName]: title,
-          [piexif.IPTC.Caption]: description,
-          [piexif.IPTC.Keywords]: keywords,
+          5: title, // IPTC.ObjectName (Title)
+          120: description, // IPTC.Caption (Description)
+          25: keywords, // IPTC.Keywords
         };
 
         const exifObj = { IPTC: iptcData };
