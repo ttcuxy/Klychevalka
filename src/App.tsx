@@ -234,6 +234,8 @@ Return the result in a valid JSON object with the following keys:
           25: keywords, // IPTC.Keywords
         };
 
+        console.log("Данные для записи:", iptcData);
+
         const exifObj = { IPTC: iptcData };
         const exifbytes = piexif.dump(exifObj);
         const newImageDataUrl = piexif.insert(exifbytes, imageDataUrl);
