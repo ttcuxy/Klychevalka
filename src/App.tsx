@@ -1,4 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
+import piexif from 'piexifjs';
+import JSZip from 'jszip';
 
 interface OpenAIModel {
   id: string;
@@ -38,6 +40,7 @@ function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [status, setStatus] = useState<'idle' | 'processing' | 'done'>('idle');
+  const [isDownloading, setIsDownloading] = useState(false);
   const [prompt, setPrompt] = useState(`You are an expert stock photography metadata analyst. Analyze the provided image and generate a commercially optimized Title, Description, and Keywords for Adobe Stock.
 Constraints:
 - Title: up to 140 characters (ideally 70-120), natural and descriptive. Must clearly state the subject, action, and key details. Should not be just a keyword list.
@@ -213,7 +216,54 @@ Return the result in a valid JSON object with the following keys:
     setStatus('done');
   };
 
+  const handleDownload = async () => {
+    setIsDownloading(true);
+    try {
+      const zip = new JSZip();
+      const completedFiles = uploadedFiles.filter(
+        (f) => f.status === 'completed' && f.metadata
+      );
+
+      for (const uploadedFile of completedFiles) {
+        const imageDataUrl = await toBase64(uploadedFile.file);
+        const { title, description, keywords } = uploadedFile.metadata!;
+
+        const iptcData = {
+          [piexif.IPTC.ObjectName]: title,
+          [piexif.IPTC.Caption]: description,
+          [piexif.IPTC.Keywords]: keywords,
+        };
+
+        const exifObj = { IPTC: iptcData };
+        const exifbytes = piexif.dump(exifObj);
+        const newImageDataUrl = piexif.insert(exifbytes, imageDataUrl);
+
+        const response = await fetch(newImageDataUrl);
+        const blob = await response.blob();
+
+        zip.file(uploadedFile.file.name, blob);
+      }
+
+      if (completedFiles.length > 0) {
+        const content = await zip.generateAsync({ type: 'blob' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(content);
+        link.download = 'metadata_images.zip';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(link.href);
+      }
+    } catch (e) {
+      console.error('Failed to download files:', e);
+      setError('An error occurred during the download process.');
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
   const hasPendingFiles = uploadedFiles.some(f => f.status === 'pending');
+  const completedFilesCount = uploadedFiles.filter(f => f.status === 'completed').length;
 
   return (
     <div className="bg-neutral-900 text-gray-200 min-h-screen">
@@ -464,10 +514,11 @@ Return the result in a valid JSON object with the following keys:
                     </button>
                     <button
                       id="download-btn"
-                      disabled
+                      onClick={handleDownload}
+                      disabled={isDownloading || status === 'processing' || completedFilesCount === 0}
                       className="flex-1 bg-neutral-600 hover:bg-neutral-700 text-white font-semibold py-2 px-4 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      Download All as ZIP
+                      {isDownloading ? 'Downloading...' : `Download ${completedFilesCount} Files as ZIP`}
                     </button>
                   </div>
                 </div>
