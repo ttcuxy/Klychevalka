@@ -1,21 +1,43 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 
 interface OpenAIModel {
   id: string;
 }
 
+interface UploadedFile {
+  id: number;
+  file: File;
+  status: 'pending' | 'processing' | 'completed' | 'error';
+  metadata: {
+    title: string;
+    description: string;
+    keywords: string[];
+  } | null;
+  error?: string;
+}
+
+const toBase64 = (file: File): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => {
+      const result = reader.result as string;
+      resolve(result);
+    };
+    reader.onerror = (error) => reject(error);
+  });
+
 function App() {
   const [apiKey, setApiKey] = useState('');
   const [models, setModels] = useState<string[]>([]);
+  const [selectedModel, setSelectedModel] = useState<string>('');
   const [isVerifying, setIsVerifying] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [status, setStatus] = useState<'idle' | 'processing' | 'done'>('idle');
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [prompt, setPrompt] = useState(`You are an expert stock photography metadata analyst. Analyze the provided image and generate a commercially optimized Title, Description, and Keywords for Adobe Stock.
 Constraints:
 - Title: up to 140 characters (ideally 70-120), natural and descriptive. Must clearly state the subject, action, and key details. Should not be just a keyword list.
@@ -33,6 +55,13 @@ Return the result in a valid JSON object with the following keys:
 - "title"
 - "description"
 - "keywords" (as a JSON array of 27-40 items in priority order, most important first)`);
+
+  useEffect(() => {
+    if (models.length > 0 && !selectedModel) {
+      const preferredModel = models.find(m => m.includes('gpt-4o')) || models[0];
+      setSelectedModel(preferredModel);
+    }
+  }, [models, selectedModel]);
 
   const handleVerifyApiKey = async () => {
     if (!apiKey) {
@@ -56,10 +85,23 @@ Return the result in a valid JSON object with the following keys:
         throw new Error(data.error?.message || 'Failed to verify API key.');
       }
 
-      const fetchedModels = data.data
+      const gptVisionModels = data.data
+        .filter((model: OpenAIModel) => model.id.includes('gpt') && model.id.includes('vision'))
         .map((model: OpenAIModel) => model.id)
         .sort();
+      
+      const otherGpt4Models = data.data
+        .filter((model: OpenAIModel) => model.id.includes('gpt-4o'))
+        .map((model: OpenAIModel) => model.id)
+        .sort();
+
+      const fetchedModels = [...new Set([...gptVisionModels, ...otherGpt4Models])];
+
+      if (fetchedModels.length === 0) {
+        setError("No compatible vision models found with this API key.");
+      }
       setModels(fetchedModels);
+
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -70,14 +112,20 @@ Return the result in a valid JSON object with the following keys:
   const handleFilesChange = (files: FileList | null) => {
     if (!files) return;
 
-    const newFiles = Array.from(files)
+    const newFiles: UploadedFile[] = Array.from(files)
       .filter((file) => file.type.startsWith('image/'))
       .filter(
         (newFile) =>
           !uploadedFiles.some(
-            (existingFile) => existingFile.name === newFile.name
+            (existing) => existing.file.name === newFile.name
           )
-      );
+      )
+      .map((file, index) => ({
+        id: Date.now() + index,
+        file,
+        status: 'pending',
+        metadata: null,
+      }));
 
     setUploadedFiles((prevFiles) => [...prevFiles, ...newFiles]);
   };
@@ -98,11 +146,74 @@ Return the result in a valid JSON object with the following keys:
     handleFilesChange(e.dataTransfer.files);
   };
 
-  const removeFile = (indexToRemove: number) => {
+  const removeFile = (idToRemove: number) => {
     setUploadedFiles((prevFiles) =>
-      prevFiles.filter((_, index) => index !== indexToRemove)
+      prevFiles.filter((file) => file.id !== idToRemove)
     );
   };
+
+  const handleStartProcessing = async () => {
+    if (!apiKey || !selectedModel) {
+      setError("Please verify API key and select a model.");
+      return;
+    }
+    setStatus('processing');
+
+    for (const uploadedFile of uploadedFiles) {
+      if (uploadedFile.status !== 'pending') {
+        continue;
+      }
+
+      setUploadedFiles(prev => prev.map(f => f.id === uploadedFile.id ? { ...f, status: 'processing' } : f));
+
+      try {
+        const base64Image = await toBase64(uploadedFile.file);
+
+        const response = await fetch("https://api.openai.com/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model: selectedModel,
+            messages: [
+              {
+                role: "user",
+                content: [
+                  { type: "text", text: prompt },
+                  {
+                    type: "image_url",
+                    image_url: {
+                      url: base64Image,
+                    },
+                  },
+                ],
+              },
+            ],
+            max_tokens: 1024,
+            response_format: { type: "json_object" },
+          }),
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.error?.message || "API request failed");
+        }
+
+        const metadata = JSON.parse(data.choices[0].message.content);
+        setUploadedFiles(prev => prev.map(f => f.id === uploadedFile.id ? { ...f, status: 'completed', metadata } : f));
+
+      } catch (e) {
+        const errorMessage = (e as Error).message;
+        setUploadedFiles(prev => prev.map(f => f.id === uploadedFile.id ? { ...f, status: 'error', error: errorMessage } : f));
+      }
+    }
+    setStatus('done');
+  };
+
+  const hasPendingFiles = uploadedFiles.some(f => f.status === 'pending');
 
   return (
     <div className="bg-neutral-900 text-gray-200 min-h-screen">
@@ -156,13 +267,13 @@ Return the result in a valid JSON object with the following keys:
                       className="w-full bg-neutral-700 border border-neutral-600 rounded-md px-3 py-2 text-gray-200 placeholder:text-gray-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 transition"
                       value={apiKey}
                       onChange={(e) => setApiKey(e.target.value)}
-                      disabled={isVerifying}
+                      disabled={isVerifying || status === 'processing'}
                     />
                   </div>
                   <button
                     id="verify-key-btn"
                     onClick={handleVerifyApiKey}
-                    disabled={isVerifying || !apiKey.trim()}
+                    disabled={isVerifying || !apiKey.trim() || status === 'processing'}
                     className="w-full bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-4 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {isVerifying
@@ -188,7 +299,9 @@ Return the result in a valid JSON object with the following keys:
                     </label>
                     <select
                       id="model-select"
-                      disabled={models.length === 0 || isVerifying}
+                      value={selectedModel}
+                      onChange={(e) => setSelectedModel(e.target.value)}
+                      disabled={models.length === 0 || isVerifying || status === 'processing'}
                       className="w-full bg-neutral-700 border border-neutral-600 rounded-md px-3 py-2 text-gray-200 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500"
                     >
                       {models.length === 0 ? (
@@ -213,7 +326,8 @@ Return the result in a valid JSON object with the following keys:
                       id="prompt-input"
                       disabled
                       className="w-full bg-neutral-700 border border-neutral-600 rounded-md px-3 py-2 text-gray-200 h-48 resize-none disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500"
-                      defaultValue={prompt}
+                      value={prompt}
+                      onChange={(e) => setPrompt(e.target.value)}
                     />
                   </div>
                 </div>
@@ -244,6 +358,7 @@ Return the result in a valid JSON object with the following keys:
                       multiple
                       accept="image/*"
                       className="hidden"
+                      disabled={status === 'processing'}
                     />
                     <svg
                       xmlns="http://www.w3.org/2000/svg"
@@ -277,40 +392,47 @@ Return the result in a valid JSON object with the following keys:
                         </p>
                       </div>
                     ) : (
-                      uploadedFiles.map((file, index) => (
+                      uploadedFiles.map((item) => (
                         <div
-                          key={index}
+                          key={item.id}
                           className="flex items-center justify-between bg-neutral-800 p-2 rounded-md animate-in fade-in"
                         >
                           <div className="flex items-center gap-3 overflow-hidden">
                             <img
-                              src={URL.createObjectURL(file)}
-                              alt={file.name}
+                              src={URL.createObjectURL(item.file)}
+                              alt={item.file.name}
                               className="w-10 h-10 object-cover rounded flex-shrink-0"
                             />
                             <span className="text-sm text-gray-300 truncate">
-                              {file.name}
+                              {item.file.name}
                             </span>
                           </div>
-                          <button
-                            onClick={() => removeFile(index)}
-                            className="text-gray-500 hover:text-red-500 p-1 rounded-full transition-colors"
-                          >
-                            <svg
-                              xmlns="http://www.w3.org/2000/svg"
-                              width="18"
-                              height="18"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
+                          <div className="flex items-center gap-3">
+                            {item.status === 'pending' && <span className="text-xs text-gray-400">Pending</span>}
+                            {item.status === 'processing' && <span className="text-xs text-yellow-400 animate-pulse">Processing...</span>}
+                            {item.status === 'completed' && <span className="text-xs text-green-400">Completed</span>}
+                            {item.status === 'error' && <span className="text-xs text-red-400">Error</span>}
+                            <button
+                              onClick={() => removeFile(item.id)}
+                              disabled={status === 'processing'}
+                              className="text-gray-500 hover:text-red-500 p-1 rounded-full transition-colors disabled:opacity-50"
                             >
-                              <line x1="18" y1="6" x2="6" y2="18" />
-                              <line x1="6" y1="6" x2="18" y2="18" />
-                            </svg>
-                          </button>
+                              <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="18"
+                                height="18"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              >
+                                <line x1="18" y1="6" x2="6" y2="18" />
+                                <line x1="6" y1="6" x2="18" y2="18" />
+                              </svg>
+                            </button>
+                          </div>
                         </div>
                       ))
                     )}
@@ -318,10 +440,11 @@ Return the result in a valid JSON object with the following keys:
                   <div className="flex gap-4">
                     <button
                       id="start-btn"
-                      disabled={uploadedFiles.length === 0}
+                      onClick={handleStartProcessing}
+                      disabled={!hasPendingFiles || status === 'processing' || !selectedModel}
                       className="flex-1 bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      Start Processing
+                      {status === 'processing' ? 'Processing...' : `Process ${uploadedFiles.filter(f => f.status === 'pending').length} Files`}
                     </button>
                     <button
                       id="download-btn"
