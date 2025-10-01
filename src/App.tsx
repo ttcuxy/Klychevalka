@@ -229,14 +229,24 @@ Return the result in a valid JSON object with the following keys:
 
         const base64String = await toBase64(file.file);
         
-        // Шаг 1: LOAD
-        let exifObj = piexif.load(base64String);
-        if (!exifObj || !exifObj["0th"]) {
-          exifObj = {"0th": {}, "Exif": {}, "GPS": {}, "1st": {}, "thumbnail": null, "IPTC": {}};
+        // Шаг 1: LOAD (безопасная загрузка)
+        let exifObj;
+        try {
+            exifObj = piexif.load(base64String);
+        } catch (e) {
+            console.log("Could not parse EXIF data, creating new structure.", e);
+            exifObj = {}; // Начинаем с пустого объекта, если загрузка не удалась
         }
-        if (!exifObj.IPTC) exifObj.IPTC = {};
 
-        // Шаг 2: MODIFY
+        // Шаг 2: MODIFY (гарантируем наличие всех секций)
+        if (!exifObj) exifObj = {};
+        if (!exifObj['0th']) exifObj['0th'] = {};
+        if (!exifObj['Exif']) exifObj['Exif'] = {};
+        if (!exifObj['GPS']) exifObj['GPS'] = {};
+        if (!exifObj['1st']) exifObj['1st'] = {};
+        if (!exifObj['IPTC']) exifObj['IPTC'] = {};
+        if (exifObj.thumbnail === undefined) exifObj.thumbnail = null;
+
         const { title, description, keywords } = file.metadata;
 
         // Заполняем IPTC (стандарт для Adobe и другого проф. ПО)
@@ -245,13 +255,7 @@ Return the result in a valid JSON object with the following keys:
         exifObj.IPTC[piexif.Const.IPTC.Keywords] = keywords;
 
         // Заполняем стандартные, совместимые поля EXIF.
-        // ImageDescription (270) часто отображается как "Тема" (Subject) в Windows.
-        // Этот тег должен быть в разделе "0th", а не "Exif".
         exifObj['0th'][piexif.Const.ImageIFD.ImageDescription] = description;
-
-        // ПРИМЕЧАНИЕ: Проприетарные теги Windows XPTitle (40091) и XPKeywords (40094)
-        // не поддерживаются библиотекой piexifjs и вызывают сбой. Поэтому мы их не используем.
-        // Основные данные сохранены в IPTC, что является стандартом для профессионального ПО.
         
         // Шаг 3: DUMP
         const newExifStr = piexif.dump(exifObj);
