@@ -223,10 +223,10 @@ Return the result in a valid JSON object with the following keys:
     const zip = new JSZip();
     const filesToProcess = uploadedFiles.filter(f => f.status === 'completed' && f.metadata);
 
-    try {
-      for (const file of filesToProcess) {
-        if (!file.metadata) continue;
+    for (const file of filesToProcess) {
+      if (!file.metadata) continue;
 
+      try {
         console.log(`--- Processing file: ${file.file.name} ---`);
         const base64String = await toBase64(file.file);
 
@@ -234,56 +234,53 @@ Return the result in a valid JSON object with the following keys:
         let exifObj;
         try {
           exifObj = piexif.load(base64String);
-          console.log('1. Successfully loaded EXIF data:', exifObj);
+          console.log('1. Loaded EXIF data:', exifObj);
         } catch (e) {
-          console.warn(`1. Could not parse EXIF data for ${file.file.name}, creating new structure.`, e);
+          console.warn(`1. Could not parse EXIF for ${file.file.name}, creating new structure.`, e);
           exifObj = { "0th": {}, "Exif": {}, "GPS": {}, "1st": {}, "IPTC": {}, "thumbnail": null };
         }
 
-        // Step 2: VALIDATE & NORMALIZE
-        if (!exifObj) {
-          console.warn(`2. piexif.load returned ${exifObj}. Initializing empty EXIF object.`);
-          exifObj = { "0th": {}, "Exif": {}, "GPS": {}, "1st": {}, "IPTC": {}, "thumbnail": null };
+        // Step 2: VALIDATE & NORMALIZE (ROBUST)
+        // Ensure all required top-level blocks exist before trying to write to them.
+        exifObj['0th'] = exifObj['0th'] || {};
+        exifObj['Exif'] = exifObj['Exif'] || {};
+        exifObj['GPS'] = exifObj['GPS'] || {};
+        exifObj['1st'] = exifObj['1st'] || {};
+        exifObj['IPTC'] = exifObj['IPTC'] || {}; // This is the critical fix.
+        if (exifObj.thumbnail === undefined) {
+          exifObj.thumbnail = null;
         }
-        
-        // Ensure all required keys exist to prevent errors
-        if (!exifObj['0th']) exifObj['0th'] = {};
-        if (!exifObj['Exif']) exifObj['Exif'] = {};
-        if (!exifObj['GPS']) exifObj['GPS'] = {};
-        if (!exifObj['1st']) exifObj['1st'] = {};
-        if (!exifObj['IPTC']) exifObj['IPTC'] = {};
-        if (exifObj.thumbnail === undefined) exifObj.thumbnail = null;
-
-        console.log('2. EXIF object after normalization:', JSON.parse(JSON.stringify(exifObj)));
+        console.log('2. EXIF object after normalization:', exifObj);
 
         const { title, description, keywords } = file.metadata;
-        console.log('3. Metadata to inject:', { title, description, keywords });
-
+        
         // Step 3: MODIFY
-        try {
-          exifObj.IPTC[piexif.Const.IPTC.ObjectName] = title;
-          exifObj.IPTC[piexif.Const.IPTC.Caption] = description;
-          exifObj.IPTC[piexif.Const.IPTC.Keywords] = keywords;
-          exifObj['0th'][piexif.Const.ImageIFD.ImageDescription] = description;
-          console.log('3. EXIF object after modification:', JSON.parse(JSON.stringify(exifObj)));
-        } catch (modifyError) {
-          console.error(`Error modifying EXIF object for ${file.file.name}:`, modifyError);
-          console.error('State of exifObj before modification error:', exifObj);
-          continue; // Skip this file
-        }
+        // Now it's safe to write to exifObj.IPTC because we guaranteed it exists.
+        exifObj.IPTC[piexif.Const.IPTC.ObjectName] = title;
+        exifObj.IPTC[piexif.Const.IPTC.Caption] = description;
+        exifObj.IPTC[piexif.Const.IPTC.Keywords] = keywords;
         
-        // Step 4: DUMP
+        // Also write description to the standard image description field
+        exifObj['0th'][piexif.Const.ImageIFD.ImageDescription] = description;
+        console.log('3. EXIF object after modification:', exifObj);
+        
+        // Step 4: DUMP & INSERT
         const newExifStr = piexif.dump(exifObj);
-        console.log('4. Dumped EXIF string (first 100 chars):', newExifStr.substring(0, 100));
-        
-        // Step 5: INSERT
         const newBase64 = piexif.insert(newExifStr, base64String);
 
         const fileData = newBase64.replace(/^data:image\/(jpeg|png);base64,/, "");
         zip.file(file.file.name, fileData, { base64: true });
-        console.log(`5. Successfully processed and added ${file.file.name} to zip.`);
-      }
+        console.log(`4. Successfully processed and added ${file.file.name} to zip.`);
 
+      } catch (err) {
+        console.error(`Failed to process file ${file.file.name}:`, err);
+        setError(`An error occurred while processing ${file.file.name}: ${(err as Error).message}`);
+        // Optionally update the status of the specific file to 'error'
+        setUploadedFiles(prev => prev.map(f => f.id === file.id ? { ...f, status: 'error', error: (err as Error).message } : f));
+      }
+    }
+
+    try {
       if (Object.keys(zip.files).length > 0) {
         const content = await zip.generateAsync({ type: "blob" });
         const link = document.createElement("a");
@@ -294,10 +291,9 @@ Return the result in a valid JSON object with the following keys:
         document.body.removeChild(link);
         URL.revokeObjectURL(link.href);
       }
-
-    } catch (err) {
-      console.error("Failed to download files:", err);
-      setError(`An error occurred during the download process: ${(err as Error).message}`);
+    } catch (zipError) {
+        console.error("Failed to generate or download zip file:", zipError);
+        setError(`Failed to generate ZIP file: ${(zipError as Error).message}`);
     } finally {
       setIsDownloading(false);
     }
