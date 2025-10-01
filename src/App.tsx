@@ -29,18 +29,6 @@ const toBase64 = (file: File): Promise<string> =>
     reader.onerror = (error) => reject(error);
   });
 
-// 1. Helper function for UCS2 encoding
-const encodeStringToUCS2 = (str: string): number[] => {
-  const nullTerminatedStr = str + '\0';
-  const bytes: number[] = [];
-  for (let i = 0; i < nullTerminatedStr.length; i++) {
-    const code = nullTerminatedStr.charCodeAt(i);
-    bytes.push(code & 0xff);
-    bytes.push((code >> 8) & 0xff);
-  }
-  return bytes;
-};
-
 function App() {
   const [apiKey, setApiKey] = useState('');
   const [models, setModels] = useState<string[]>([]);
@@ -228,94 +216,72 @@ Return the result in a valid JSON object with the following keys:
     setStatus('done');
   };
 
- // Вспомогательная функция для кодирования строк в формат, понятный Windows
-function encodeStringToUCS2(str: string): number[] {
-  const bytes: number[] = [];
-  for (let i = 0; i < str.length; i++) {
-    const code = str.charCodeAt(i);
-    bytes.push(code & 0xff);
-    bytes.push((code >> 8) & 0xff);
-  }
-  return bytes.concat(0x00, 0x00); // Null terminator
-}
+  const handleDownload = async () => {
+    setIsDownloading(true);
+    setError(null);
 
-// ОСНОВНАЯ ФУНКЦИЯ СКАЧИВАНИЯ
-const handleDownload = async () => {
-  setIsDownloading(true);
-  setError(null); // Сбрасываем предыдущие ошибки
+    const zip = new JSZip();
+    const filesToProcess = uploadedFiles.filter(f => f.status === 'completed' && f.metadata);
 
-  const zip = new JSZip();
-  const filesToProcess = uploadedFiles.filter(f => f.status === 'completed');
+    try {
+      for (const file of filesToProcess) {
+        if (!file.metadata) continue;
 
-  // Функция-обертка для чтения файла, чтобы использовать async/await
-  const readFileAsBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = error => reject(error);
-      reader.readAsDataURL(file);
-    });
-  };
+        const base64String = await toBase64(file.file);
+        
+        // Шаг 1: LOAD
+        let exifObj = piexif.load(base64String);
+        if (!exifObj || !exifObj["0th"]) {
+          exifObj = {"0th": {}, "Exif": {}, "GPS": {}, "1st": {}, "thumbnail": null, "IPTC": {}};
+        }
+        if (!exifObj.IPTC) exifObj.IPTC = {};
 
-  try {
-    for (const file of filesToProcess) {
-      if (!file.metadata) continue;
+        // Шаг 2: MODIFY
+        const { title, description, keywords } = file.metadata;
 
-      const base64String = await readFileAsBase64(file.file);
-      
-      // Шаг 1: LOAD
-      // Загружаем существующие метаданные или создаем пустую структуру, если их нет
-      let exifObj = piexif.load(base64String);
-      if (!exifObj || !exifObj["0th"]) {
-        exifObj = {"0th": {}, "Exif": {}, "GPS": {}, "1st": {}, "thumbnail": null, "IPTC": {}};
+        // Заполняем IPTC (стандарт для Adobe и другого проф. ПО)
+        exifObj.IPTC[piexif.Const.IPTC.ObjectName] = title;
+        exifObj.IPTC[piexif.Const.IPTC.Caption] = description;
+        exifObj.IPTC[piexif.Const.IPTC.Keywords] = keywords;
+
+        // Заполняем стандартные, совместимые поля EXIF.
+        // ImageDescription (270) часто отображается как "Тема" (Subject) в Windows.
+        // Этот тег должен быть в разделе "0th", а не "Exif".
+        exifObj['0th'][piexif.Const.ImageIFD.ImageDescription] = description;
+
+        // ПРИМЕЧАНИЕ: Проприетарные теги Windows XPTitle (40091) и XPKeywords (40094)
+        // не поддерживаются библиотекой piexifjs и вызывают сбой. Поэтому мы их не используем.
+        // Основные данные сохранены в IPTC, что является стандартом для профессионального ПО.
+        
+        // Шаг 3: DUMP
+        const newExifStr = piexif.dump(exifObj);
+        
+        // Шаг 4: INSERT
+        const newBase64 = piexif.insert(newExifStr, base64String);
+
+        // Добавляем финальный файл в ZIP
+        const fileData = newBase64.replace(/^data:image\/(jpeg|png);base64,/, "");
+        zip.file(file.file.name, fileData, { base64: true });
       }
-      if (!exifObj.Exif) exifObj.Exif = {};
-      if (!exifObj.IPTC) exifObj.IPTC = {};
 
-      // Шаг 2: MODIFY
-      const { title, description, keywords } = file.metadata;
+      if (Object.keys(zip.files).length > 0) {
+        const content = await zip.generateAsync({ type: "blob" });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(content);
+        link.download = "metadata_images.zip";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(link.href);
+      }
 
-     // Заполняем IPTC (для Adobe и др.), используя ПРЯМЫЕ ЧИСЛОВЫЕ КОДЫ
-      exifObj.IPTC[5] = title; // 5 = ObjectName
-      exifObj.IPTC[120] = description; // 120 = Caption_Abstract
-      exifObj.IPTC[25] = keywords; // 25 = Keywords
-
-      // Заполняем Exif (для Windows Explorer), используя ПРЯМЫЕ ЧИСЛОВЫЕ КОДЫ
-      exifObj.Exif[270] = description; // 270 = ImageDescription
-      exifObj.Exif[40091] = encodeStringToUCS2(title); // 40091 = XPTitle
-      exifObj.Exif[40094] = encodeStringToUCS2(keywords.join(';')); // 40094 = XPKeywords
-      // Используем нашу функцию для правильной кодировки
-    
-      
-      // Шаг 3: DUMP
-      const newExifStr = piexif.dump(exifObj);
-      
-      // Шаг 4: INSERT
-      const newBase64 = piexif.insert(newExifStr, base64String);
-
-      // Добавляем финальный файл в ZIP
-      // Удаляем заголовок 'data:image/jpeg;base64,' для JSZip
-      const fileData = newBase64.replace(/^data:image\/(jpeg|png);base64,/, "");
-      zip.file(file.file.name, fileData, { base64: true });
+    } catch (err) {
+      console.error("Failed to download files:", err);
+      setError(`An error occurred during the download process: ${(err as Error).message}`);
+    } finally {
+      setIsDownloading(false);
     }
-
-    if (Object.keys(zip.files).length > 0) {
-      const content = await zip.generateAsync({ type: "blob" });
-      const link = document.createElement("a");
-      link.href = URL.createObjectURL(content);
-      link.download = "metadata_images.zip";
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    }
-
-  } catch (err) {
-    console.error("Failed to download files:", err);
-    setError("An error occurred during the download process.");
-  } finally {
-    setIsDownloading(false);
-  }
-};
+  };
 
   const hasPendingFiles = uploadedFiles.some(f => f.status === 'pending');
   const completedFilesCount = uploadedFiles.filter(f => f.status === 'completed').length;
