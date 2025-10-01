@@ -49,7 +49,23 @@ export default {
                   </div>
                   <div>
                     <label for="prompt-input" class="block text-sm font-medium text-muted-foreground mb-2">Prompt</label>
-                    <textarea id="prompt-input" disabled class="w-full bg-input border border-border rounded-md px-3 py-2 text-foreground h-32 resize-none disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background">Generate a descriptive caption, 5-10 relevant keywords (tags), and a short alt-text for this image.</textarea>
+                    <textarea id="prompt-input" disabled class="w-full bg-input border border-border rounded-md px-3 py-2 text-foreground h-32 resize-none disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background">You are an expert stock photography metadata analyst. Analyze the provided image and generate a commercially optimized Title, Description, and Keywords for Adobe Stock.
+Constraints:
+- Title: up to 140 characters (ideally 70-120), natural and descriptive. Must clearly state the subject, action, and key details. Should not be just a keyword list.
+- Description: up to 160 characters, concise and SEO-friendly. Reinforce the main concepts of the image.
+- Keywords: between 27 and 40 unique, high-quality terms.
+  - Order matters: put the most important and relevant words in the first 10 keywords (they carry extra weight).
+  - Include a mix of:
+    - Direct content (objects, people, actions, colors, location)
+    - Specific details (indoor/outdoor, time of day, quantity of people, mood)
+    - Abstract concepts (success, leadership, growth, happiness, etc.)
+  - No duplicates, no irrelevant or generic terms, no brand names.
+  - Use single words or short phrases (not long sentences).
+Output Format:
+Return the result in a valid JSON object with the following keys:
+- "title"
+- "description"
+- "keywords" (as a JSON array of 27-40 items in priority order, most important first)</textarea>
                   </div>
                 </div>
               </div>
