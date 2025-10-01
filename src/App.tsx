@@ -227,19 +227,26 @@ Return the result in a valid JSON object with the following keys:
       for (const file of filesToProcess) {
         if (!file.metadata) continue;
 
+        console.log(`--- Processing file: ${file.file.name} ---`);
         const base64String = await toBase64(file.file);
-        
-        // Шаг 1: LOAD (безопасная загрузка)
+
+        // Step 1: LOAD
         let exifObj;
         try {
-            exifObj = piexif.load(base64String);
+          exifObj = piexif.load(base64String);
+          console.log('1. Successfully loaded EXIF data:', exifObj);
         } catch (e) {
-            console.log("Could not parse EXIF data, creating new structure.", e);
-            exifObj = {}; // Начинаем с пустого объекта, если загрузка не удалась
+          console.warn(`1. Could not parse EXIF data for ${file.file.name}, creating new structure.`, e);
+          exifObj = { "0th": {}, "Exif": {}, "GPS": {}, "1st": {}, "IPTC": {}, "thumbnail": null };
         }
 
-        // Шаг 2: MODIFY (гарантируем наличие всех секций)
-        if (!exifObj) exifObj = {};
+        // Step 2: VALIDATE & NORMALIZE
+        if (!exifObj) {
+          console.warn(`2. piexif.load returned ${exifObj}. Initializing empty EXIF object.`);
+          exifObj = { "0th": {}, "Exif": {}, "GPS": {}, "1st": {}, "IPTC": {}, "thumbnail": null };
+        }
+        
+        // Ensure all required keys exist to prevent errors
         if (!exifObj['0th']) exifObj['0th'] = {};
         if (!exifObj['Exif']) exifObj['Exif'] = {};
         if (!exifObj['GPS']) exifObj['GPS'] = {};
@@ -247,25 +254,34 @@ Return the result in a valid JSON object with the following keys:
         if (!exifObj['IPTC']) exifObj['IPTC'] = {};
         if (exifObj.thumbnail === undefined) exifObj.thumbnail = null;
 
+        console.log('2. EXIF object after normalization:', JSON.parse(JSON.stringify(exifObj)));
+
         const { title, description, keywords } = file.metadata;
+        console.log('3. Metadata to inject:', { title, description, keywords });
 
-        // Заполняем IPTC (стандарт для Adobe и другого проф. ПО)
-        exifObj.IPTC[piexif.Const.IPTC.ObjectName] = title;
-        exifObj.IPTC[piexif.Const.IPTC.Caption] = description;
-        exifObj.IPTC[piexif.Const.IPTC.Keywords] = keywords;
-
-        // Заполняем стандартные, совместимые поля EXIF.
-        exifObj['0th'][piexif.Const.ImageIFD.ImageDescription] = description;
+        // Step 3: MODIFY
+        try {
+          exifObj.IPTC[piexif.Const.IPTC.ObjectName] = title;
+          exifObj.IPTC[piexif.Const.IPTC.Caption] = description;
+          exifObj.IPTC[piexif.Const.IPTC.Keywords] = keywords;
+          exifObj['0th'][piexif.Const.ImageIFD.ImageDescription] = description;
+          console.log('3. EXIF object after modification:', JSON.parse(JSON.stringify(exifObj)));
+        } catch (modifyError) {
+          console.error(`Error modifying EXIF object for ${file.file.name}:`, modifyError);
+          console.error('State of exifObj before modification error:', exifObj);
+          continue; // Skip this file
+        }
         
-        // Шаг 3: DUMP
+        // Step 4: DUMP
         const newExifStr = piexif.dump(exifObj);
+        console.log('4. Dumped EXIF string (first 100 chars):', newExifStr.substring(0, 100));
         
-        // Шаг 4: INSERT
+        // Step 5: INSERT
         const newBase64 = piexif.insert(newExifStr, base64String);
 
-        // Добавляем финальный файл в ZIP
         const fileData = newBase64.replace(/^data:image\/(jpeg|png);base64,/, "");
         zip.file(file.file.name, fileData, { base64: true });
+        console.log(`5. Successfully processed and added ${file.file.name} to zip.`);
       }
 
       if (Object.keys(zip.files).length > 0) {
