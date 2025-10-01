@@ -383,59 +383,75 @@ Return the result in a valid JSON object with the following keys:
                   </div>
                   <div
                     id="image-list-container"
-                    className="space-y-2 max-h-96 min-h-[6rem] overflow-y-auto p-2 border border-neutral-700 rounded-md bg-neutral-900/50"
+                    className="max-h-96 min-h-[6rem] overflow-y-auto border border-neutral-700 rounded-md bg-neutral-900/50"
                   >
-                    {uploadedFiles.length === 0 ? (
-                      <div className="flex items-center justify-center h-full">
-                        <p className="text-gray-500 text-center">
-                          No images uploaded yet.
-                        </p>
-                      </div>
-                    ) : (
-                      uploadedFiles.map((item) => (
-                        <div
-                          key={item.id}
-                          className="flex items-center justify-between bg-neutral-800 p-2 rounded-md animate-in fade-in"
-                        >
-                          <div className="flex items-center gap-3 overflow-hidden">
-                            <img
-                              src={URL.createObjectURL(item.file)}
-                              alt={item.file.name}
-                              className="w-10 h-10 object-cover rounded flex-shrink-0"
-                            />
-                            <span className="text-sm text-gray-300 truncate">
-                              {item.file.name}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-3">
-                            {item.status === 'pending' && <span className="text-xs text-gray-400">Pending</span>}
-                            {item.status === 'processing' && <span className="text-xs text-yellow-400 animate-pulse">Processing...</span>}
-                            {item.status === 'completed' && <span className="text-xs text-green-400">Completed</span>}
-                            {item.status === 'error' && <span className="text-xs text-red-400">Error</span>}
-                            <button
-                              onClick={() => removeFile(item.id)}
-                              disabled={status === 'processing'}
-                              className="text-gray-500 hover:text-red-500 p-1 rounded-full transition-colors disabled:opacity-50"
-                            >
-                              <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                width="18"
-                                height="18"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              >
-                                <line x1="18" y1="6" x2="6" y2="18" />
-                                <line x1="6" y1="6" x2="18" y2="18" />
-                              </svg>
-                            </button>
-                          </div>
-                        </div>
-                      ))
-                    )}
+                    <table className="w-full text-sm text-left">
+                      <thead className="sticky top-0 bg-neutral-800 z-[1]">
+                        <tr>
+                          <th className="p-2 border-b border-neutral-700">Filename</th>
+                          <th className="p-2 border-b border-neutral-700">Title</th>
+                          <th className="p-2 border-b border-neutral-700">Description</th>
+                          <th className="p-2 border-b border-neutral-700">Keywords</th>
+                          <th className="p-2 border-b border-neutral-700">Status</th>
+                          <th className="p-2 border-b border-neutral-700"></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {uploadedFiles.length === 0 ? (
+                          <tr>
+                            <td colSpan={6} className="text-center text-gray-500 p-4">
+                              No images uploaded yet.
+                            </td>
+                          </tr>
+                        ) : (
+                          uploadedFiles.map((item) => (
+                            <tr key={item.id} className="border-b border-neutral-800 last:border-b-0 hover:bg-neutral-700/50">
+                              <td className="p-2 align-top">
+                                <div className="flex items-center gap-3">
+                                  <img
+                                    src={URL.createObjectURL(item.file)}
+                                    alt={item.file.name}
+                                    className="w-10 h-10 object-cover rounded flex-shrink-0"
+                                  />
+                                  <span className="font-medium text-gray-300">{item.file.name}</span>
+                                </div>
+                              </td>
+                              <td className="p-2 align-top text-gray-400">{item.metadata?.title || '—'}</td>
+                              <td className="p-2 align-top text-gray-400">{item.metadata?.description || '—'}</td>
+                              <td className="p-2 align-top text-gray-400 break-words max-w-xs">{item.metadata?.keywords?.join(', ') || '—'}</td>
+                              <td className="p-2 align-top">
+                                {item.status === 'pending' && <span className="text-xs text-gray-400">Pending</span>}
+                                {item.status === 'processing' && <span className="text-xs text-yellow-400 animate-pulse">Processing...</span>}
+                                {item.status === 'completed' && <span className="text-xs text-green-400">Completed</span>}
+                                {item.status === 'error' && <span className="text-xs text-red-400" title={item.error}>Error</span>}
+                              </td>
+                              <td className="p-2 align-top text-right">
+                                <button
+                                  onClick={() => removeFile(item.id)}
+                                  disabled={status === 'processing'}
+                                  className="text-gray-500 hover:text-red-500 p-1 rounded-full transition-colors disabled:opacity-50"
+                                >
+                                  <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    width="18"
+                                    height="18"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="2"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                  >
+                                    <line x1="18" y1="6" x2="6" y2="18" />
+                                    <line x1="6" y1="6" x2="18" y2="18" />
+                                  </svg>
+                                </button>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
                   </div>
                   <div className="flex gap-4">
                     <button
