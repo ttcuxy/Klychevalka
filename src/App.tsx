@@ -228,7 +228,6 @@ Return the result in a valid JSON object with the following keys:
     setStatus('done');
   };
 
-  // 2. Rewritten handleDownload function
   const handleDownload = async () => {
     setIsDownloading(true);
     setError(null);
@@ -243,19 +242,14 @@ Return the result in a valid JSON object with the following keys:
         const { title, description, keywords } = uploadedFile.metadata!;
 
         // Step LOAD
-        const exifObj = piexif.load(base64String);
+        let exifObj = piexif.load(base64String);
+
+        // Handle files with no existing metadata
+        if (!exifObj["0th"]) {
+          exifObj = {"0th": {}, "Exif": {}, "GPS": {}, "1st": {}, "thumbnail": null, "IPTC": {}};
+        }
 
         // Step MODIFY
-        if (!exifObj.Exif) {
-          exifObj.Exif = {};
-        }
-        if (!exifObj.IPTC) {
-          exifObj.IPTC = {};
-        }
-        if (!exifObj['0th']) {
-          exifObj['0th'] = {};
-        }
-
         // IPTC Fields
         exifObj.IPTC[piexif.Const.IPTC.ObjectName] = title; // 5
         exifObj.IPTC[piexif.Const.IPTC.Caption] = description; // 120
