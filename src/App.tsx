@@ -228,67 +228,93 @@ Return the result in a valid JSON object with the following keys:
     setStatus('done');
   };
 
-  const handleDownload = async () => {
-    setIsDownloading(true);
-    setError(null);
-    try {
-      const zip = new JSZip();
-      const completedFiles = uploadedFiles.filter(
-        (f) => f.status === 'completed' && f.metadata
-      );
+ // Вспомогательная функция для кодирования строк в формат, понятный Windows
+function encodeStringToUCS2(str: string): number[] {
+  const bytes: number[] = [];
+  for (let i = 0; i < str.length; i++) {
+    const code = str.charCodeAt(i);
+    bytes.push(code & 0xff);
+    bytes.push((code >> 8) & 0xff);
+  }
+  return bytes.concat(0x00, 0x00); // Null terminator
+}
 
-      for (const uploadedFile of completedFiles) {
-        const base64String = await toBase64(uploadedFile.file);
-        const { title, description, keywords } = uploadedFile.metadata!;
+// ОСНОВНАЯ ФУНКЦИЯ СКАЧИВАНИЯ
+const handleDownload = async () => {
+  setIsDownloading(true);
+  setError(null); // Сбрасываем предыдущие ошибки
 
-        // Step LOAD
-        let exifObj = piexif.load(base64String);
+  const zip = new JSZip();
+  const filesToProcess = uploadedFiles.filter(f => f.status === 'completed');
 
-        // Handle files with no existing metadata
-        if (!exifObj["0th"]) {
-          exifObj = {"0th": {}, "Exif": {}, "GPS": {}, "1st": {}, "thumbnail": null, "IPTC": {}};
-        }
-
-        // Step MODIFY
-        // IPTC Fields
-        exifObj.IPTC[piexif.Const.IPTC.ObjectName] = title; // 5
-        exifObj.IPTC[piexif.Const.IPTC.Caption] = description; // 120
-        exifObj.IPTC[piexif.Const.IPTC.Keywords] = keywords; // 25
-
-        // EXIF Fields
-        exifObj['0th'][piexif.Const.ImageIFD.ImageDescription] = description; // 270
-        exifObj.Exif[piexif.Const.Exif.XPTitle] = encodeStringToUCS2(title); // 40091
-        exifObj.Exif[piexif.Const.Exif.XPKeywords] = encodeStringToUCS2(keywords.join(';')); // 40094
-
-        // Step DUMP
-        const newExifStr = piexif.dump(exifObj);
-
-        // Step INSERT
-        const newBase64 = piexif.insert(newExifStr, base64String);
-
-        // Add to ZIP
-        const response = await fetch(newBase64);
-        const blob = await response.blob();
-        zip.file(uploadedFile.file.name, blob);
-      }
-
-      if (completedFiles.length > 0) {
-        const content = await zip.generateAsync({ type: 'blob' });
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(content);
-        link.download = 'metadata_images.zip';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(link.href);
-      }
-    } catch (e) {
-      console.error('Failed to download files:', e);
-      setError(`An error occurred during the download process: ${(e as Error).message}`);
-    } finally {
-      setIsDownloading(false);
-    }
+  // Функция-обертка для чтения файла, чтобы использовать async/await
+  const readFileAsBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = error => reject(error);
+      reader.readAsDataURL(file);
+    });
   };
+
+  try {
+    for (const file of filesToProcess) {
+      if (!file.metadata) continue;
+
+      const base64String = await readFileAsBase64(file.file);
+      
+      // Шаг 1: LOAD
+      // Загружаем существующие метаданные или создаем пустую структуру, если их нет
+      let exifObj = piexif.load(base64String);
+      if (!exifObj || !exifObj["0th"]) {
+        exifObj = {"0th": {}, "Exif": {}, "GPS": {}, "1st": {}, "thumbnail": null, "IPTC": {}};
+      }
+      if (!exifObj.Exif) exifObj.Exif = {};
+      if (!exifObj.IPTC) exifObj.IPTC = {};
+
+      // Шаг 2: MODIFY
+      const { title, description, keywords } = file.metadata;
+
+      // Заполняем IPTC (для Adobe и др.)
+      exifObj.IPTC[piexif.IPTC.ObjectName] = title;
+      exifObj.IPTC[piexif.IPTC.Caption_Abstract] = description;
+      exifObj.IPTC[piexif.IPTC.Keywords] = keywords;
+
+      // Заполняем Exif (для Windows Explorer)
+      exifObj.Exif[piexif.ExifIFD.ImageDescription] = description;
+      // Используем нашу функцию для правильной кодировки
+      exifObj.Exif[piexif.WindowsExif.XPTitle] = encodeStringToUCS2(title);
+      exifObj.Exif[piexif.WindowsExif.XPKeywords] = encodeStringToUCS2(keywords.join(';'));
+      
+      // Шаг 3: DUMP
+      const newExifStr = piexif.dump(exifObj);
+      
+      // Шаг 4: INSERT
+      const newBase64 = piexif.insert(newExifStr, base64String);
+
+      // Добавляем финальный файл в ZIP
+      // Удаляем заголовок 'data:image/jpeg;base64,' для JSZip
+      const fileData = newBase64.replace(/^data:image\/(jpeg|png);base64,/, "");
+      zip.file(file.file.name, fileData, { base64: true });
+    }
+
+    if (Object.keys(zip.files).length > 0) {
+      const content = await zip.generateAsync({ type: "blob" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(content);
+      link.download = "metadata_images.zip";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+
+  } catch (err) {
+    console.error("Failed to download files:", err);
+    setError("An error occurred during the download process.");
+  } finally {
+    setIsDownloading(false);
+  }
+};
 
   const hasPendingFiles = uploadedFiles.some(f => f.status === 'pending');
   const completedFilesCount = uploadedFiles.filter(f => f.status === 'completed').length;
